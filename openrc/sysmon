@@ -1,0 +1,17 @@
+#!/sbin/openrc-run
+
+name=sysmon
+description="System Monitor Daemon"
+supervisor=supervise-daemon
+command=/usr/local/bin/sysmon
+pidfile=/run/${RC_SVCNAME}.pid
+output_log=/var/log/sysmon.log
+error_log=/var/log/sysmon_err.log
+
+depend() {
+    need net
+}
+
+start_pre() {
+    checkpath -d -m 0755 -o root:root /run
+}

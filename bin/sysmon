@@ -1,0 +1,148 @@
+#!/bin/sh
+# sysmon — System Monitor Daemon
+# Monitors SSH, services, Docker, endpoints, resources, system events.
+# Sends notifications via desktop (notify-send), sound (paplay), ntfy.
+
+export HOME=/home/main
+export PATH=/home/main/.local/bin:/usr/local/bin:/usr/bin:/bin:/sbin:/usr/sbin
+[ -f /etc/sysmon/tokens/ntfy.sh ] && . /etc/sysmon/tokens/ntfy.sh
+
+CONFIG="${1:-/etc/sysmon/config.sh}"
+DATA_DIR="/var/lib/sysmon"
+STATE_DIR="$DATA_DIR/state"
+DEDUP_DIR="$DATA_DIR/dedup"
+EVENTS_LOG="$DATA_DIR/events.jsonl"
+PLUGIN_DIR="/usr/local/lib/sysmon/plugins"
+SOUND_DIR="/usr/local/lib/sysmon/sounds"
+
+POLL_INTERVAL=5
+NTFY_TOPIC="sysmon"
+NTFY_CRITICAL_TOPIC=""
+WATCH_SERVICES=""
+WATCH_ENDPOINTS=""
+DISK_WARN=80 DISK_CRIT=90
+MEM_WARN=85 MEM_CRIT=95
+LOAD_WARN=4 LOAD_CRIT=6
+SSH_KNOWN_NETS=""
+
+[ -f "$CONFIG" ] && . "$CONFIG"
+
+mkdir -p "$STATE_DIR" "$DEDUP_DIR"
+
+log_event() {
+    severity="$1" title="$2" msg="$3"
+    ts=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+    ttl=$(echo "$title" | sed 's/"/\\"/g')
+    m=$(echo "$msg" | sed 's/"/\\"/g')
+    printf '{"ts":"%s","severity":"%s","title":"%s","message":"%s"}\n' "$ts" "$severity" "$ttl" "$m" >> "$EVENTS_LOG"
+}
+
+notify() {
+    title="$1" msg="$2" priority="${3:-3}" sound="${4:-dialog-information.oga}"
+    hostenv notify-send -a sysmon -i utilities-system-monitor "$title" "$msg" 2>/dev/null &
+    sf="$SOUND_DIR/$sound"
+    [ -f "$sf" ] && hostenv paplay "$sf" 2>/dev/null &
+    if [ -n "$NTFY_TOKEN" ]; then
+        curl -sf -o /dev/null -H "Title: $title" -H "Priority: $priority" -H "Authorization: Bearer $NTFY_TOKEN" -d "$msg" "http://127.0.0.1:8989/$NTFY_TOPIC" >/dev/null 2>&1 &
+    else
+        curl -sf -o /dev/null -H "Title: $title" -H "Priority: $priority" -d "$msg" "http://127.0.0.1:8989/$NTFY_TOPIC" >/dev/null 2>&1 &
+    fi
+    if [ -n "$NTFY_CRITICAL_TOPIC" ] && [ "$priority" -ge 5 ]; then
+        case "$title" in
+            Service:*|Tunnel*|Docker:*)
+                curl -sf -o /dev/null --max-time 10 -H "Title: [CRIT] $title" -H "Priority: $priority" -d "$msg" "https://ntfy.sh/$NTFY_CRITICAL_TOPIC" >/dev/null 2>&1 &
+                ;;
+        esac
+    fi
+    sev="info"; [ "$priority" -ge 5 ] && sev="critical"; [ "$priority" -ge 4 ] && [ "$priority" -lt 5 ] && sev="warning"
+    log_event "$sev" "$title" "$msg"
+}
+
+dedup_check() {
+    key="$1" timeout="${2:-300}"
+    df="$DEDUP_DIR/$key"
+    now=$(date +%s)
+    if [ -f "$df" ]; then
+        last=$(cat "$df" 2>/dev/null) || last=0
+        [ "$((now - last))" -lt "$timeout" ] && return 1
+    fi
+    echo "$now" > "$df"
+    return 0
+}
+
+read_state() {
+    cat "$STATE_DIR/$1" 2>/dev/null || echo ""
+}
+
+write_state() {
+    echo "$2" > "$STATE_DIR/$1"
+}
+
+ip_prefix_match() {
+    case "$1" in "$2"*) return 0 ;; *) return 1 ;; esac
+}
+
+ip_in_net() {
+    ip="$1" cidr="$2"
+    net="${cidr%/*}"
+    mask="${cidr#*/}"
+    case "$mask" in
+        8)  prefix=$(echo "$net" | cut -d. -f1) ;;
+        16) prefix=$(echo "$net" | cut -d. -f1-2) ;;
+        24) prefix=$(echo "$net" | cut -d. -f1-3) ;;
+        32) prefix="$net" ;;
+        *)  prefix=$(echo "$net" | cut -d. -f1-$((mask/8))) ;;
+    esac
+    case "$ip" in "${prefix}."*) return 0 ;; "$prefix") return 0 ;; *) return 1 ;; esac
+}
+
+cleanup() {
+    reason="${1:-shutdown}"
+    notify "System Shutting Down" "System going down: $reason" 4 "device-removed.oga"
+    uptime_sec=$(awk "{print int($1)}" /proc/uptime)
+    echo "$(date -Iseconds) $reason uptime=$uptime_sec" > "$DATA_DIR/last_shutdown"
+    exit 0
+}
+
+trap 'cleanup SIGTERM' SIGTERM
+trap 'cleanup SIGINT' SIGINT
+boot_check() {
+    up=$(uptime -p 2>/dev/null | sed "s/^up //")
+    now=$(awk "{print int($1)}" /proc/uptime)
+    last="no prior record"
+    if [ -f "$DATA_DIR/last_shutdown" ]; then
+        last=$(cat "$DATA_DIR/last_shutdown" | grep -o "uptime=[0-9]*" | cut -d= -f2)
+        ls_reason=$(head -1 "$DATA_DIR/last_shutdown" | sed "s/ uptime=[0-9]*$//")
+    fi
+    if [ "$last" = "no prior record" ] || [ "$last" -eq 0 ] 2>/dev/null; then
+        notify "System Booted" "Up $up — No prior shutdown record" 2 "device-added.oga"
+    elif [ "$now" -lt "$last" ] 2>/dev/null; then
+        notify "System Booted" "Up $up — Last: $ls_reason" 2 "device-added.oga"
+        rm -f "$DATA_DIR/last_shutdown"
+    else
+        notify "System Monitor Restarted" "Up $up — Last: $ls_reason" 2 "device-added.oga"
+        rm -f "$DATA_DIR/last_shutdown"
+    fi
+}
+
+PLUGINS=""
+register_plugin() {
+    PLUGINS="$PLUGINS $1"
+}
+
+for p in "$PLUGIN_DIR"/*.sh; do
+    [ -f "$p" ] && . "$p"
+done
+
+for p in $PLUGINS; do
+    "plugin_${p}_init" 2>/dev/null || true
+done
+
+boot_check
+
+while true; do
+    for p in $PLUGINS; do
+        "plugin_${p}_check" 2>/dev/null || true
+    done
+    sleep "$POLL_INTERVAL"
+done

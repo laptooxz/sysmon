@@ -1,0 +1,26 @@
+# sysmon default configuration
+# Copy to /etc/sysmon/config.sh and adjust for your system.
+
+# How often (seconds) to poll everything
+POLL_INTERVAL=5
+
+# OpenRC services to watch for state changes
+WATCH_SERVICES="sshd crond docker"
+
+# Local HTTP endpoints to health-check (port:label)
+# Each is curled on http://127.0.0.1:<port>/
+WATCH_ENDPOINTS=""
+
+# Resource thresholds (percent / load)
+DISK_WARN=80 DISK_CRIT=90
+MEM_WARN=85 MEM_CRIT=95
+LOAD_WARN=4 LOAD_CRIT=6
+
+# Network prefixes treated as "known" for SSH login alerts (CIDR)
+SSH_KNOWN_NETS="192.168.1.0/24"
+
+# ntfy publish topic (leave NTFY_TOKEN unset for an open topic)
+NTFY_TOPIC="sysmon"
+# Optional: forward priority>=5 infra alerts (Service*/Tunnel*/Docker*) to a
+# public ntfy.sh topic so they reach you when the local tunnel is down.
+NTFY_CRITICAL_TOPIC=""
