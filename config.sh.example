@@ -34,5 +34,5 @@ DESKTOP_USER=main
 DESKTOP_RETRY_SECS=5
 DESKTOP_RETRIES=12
 # Space-separated title globs whose popup+sound are suppressed (ntfy + events
-# still fire). e.g. DESKTOP_MUTE_PATTERNS="Load:*" mutes load-spike pops.
-DESKTOP_MUTE_PATTERNS="Load:*"
+# still fire). e.g. DESKTOP_MUTE_PATTERNS="Load*" mutes load-spike pops.
+DESKTOP_MUTE_PATTERNS="Load*"

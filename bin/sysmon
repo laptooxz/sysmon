@@ -27,7 +27,7 @@ SSH_KNOWN_NETS=""
 DESKTOP_USER="${DESKTOP_USER:-main}"
 DESKTOP_RETRY_SECS="${DESKTOP_RETRY_SECS:-5}"
 DESKTOP_RETRIES="${DESKTOP_RETRIES:-12}"
-DESKTOP_MUTE_PATTERNS="${DESKTOP_MUTE_PATTERNS:-Load:*}"
+DESKTOP_MUTE_PATTERNS="${DESKTOP_MUTE_PATTERNS:-Load*}"
 
 [ -f "$CONFIG" ] && . "$CONFIG"
 
@@ -60,15 +60,19 @@ desktop_muted() {  # title matches a DESKTOP_MUTE_PATTERNS glob -> no popup/soun
 
 notify() {
     title="$1" msg="$2" priority="${3:-3}" sound="${4:-dialog-information.oga}"
-    if ! desktop_muted "$title"; then
+    if desktop_muted "$title"; then m=yes; else m=no; fi
+    echo "[$(date +%T)] notify: title=\"$title\" muted=$m" >> /var/log/sysmon.log 2>/dev/null
+    if [ "$m" = no ]; then
         (   # desktop popup + sound: retry every DESKTOP_RETRY_SECS until the
             # desktop session is up (notify at boot happens before it exists)
             attempt=0
             while [ "$attempt" -lt "$DESKTOP_RETRIES" ]; do
                 if gui "$HOME/.local/bin/hostenv" notify-send -a sysmon -i utilities-system-monitor "$title" "$msg" 2>/dev/null; then
+                    echo "[$(date +%T)] desktop: delivered \"$title\"" >> /var/log/sysmon.log 2>/dev/null
                     [ -n "$sound" ] && [ -f "$SOUND_DIR/$sound" ] && gui "$HOME/.local/bin/hostenv" paplay "$SOUND_DIR/$sound" 2>/dev/null
                     break
                 fi
+                echo "[$(date +%T)] desktop: FAILED \"$title\" (retry $((attempt+1))/$DESKTOP_RETRIES)" >> /var/log/sysmon.log 2>/dev/null
                 attempt=$((attempt + 1))
                 sleep "$DESKTOP_RETRY_SECS"
             done
