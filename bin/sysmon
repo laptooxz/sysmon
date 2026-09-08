@@ -24,6 +24,10 @@ DISK_WARN=80 DISK_CRIT=90
 MEM_WARN=85 MEM_CRIT=95
 LOAD_WARN=4 LOAD_CRIT=6
 SSH_KNOWN_NETS=""
+DESKTOP_USER="${DESKTOP_USER:-main}"
+DESKTOP_RETRY_SECS="${DESKTOP_RETRY_SECS:-5}"
+DESKTOP_RETRIES="${DESKTOP_RETRIES:-12}"
+DESKTOP_MUTE_PATTERNS="${DESKTOP_MUTE_PATTERNS:-Load:*}"
 
 [ -f "$CONFIG" ] && . "$CONFIG"
 
@@ -37,11 +41,39 @@ log_event() {
     printf '{"ts":"%s","severity":"%s","title":"%s","message":"%s"}\n' "$ts" "$severity" "$ttl" "$m" >> "$EVENTS_LOG"
 }
 
+gui() {  # run GUI (desktop/sound) commands as the desktop user when we're root
+    if [ "$(id -u)" -eq 0 ] && command -v sudo >/dev/null 2>&1; then
+        sudo -u "$DESKTOP_USER" "$@"
+    else
+        "$@"
+    fi
+}
+
+desktop_muted() {  # title matches a DESKTOP_MUTE_PATTERNS glob -> no popup/sound (ntfy still sent)
+    for pat in $DESKTOP_MUTE_PATTERNS; do
+        case "$1" in
+            $pat) return 0 ;;
+        esac
+    done
+    return 1
+}
+
 notify() {
     title="$1" msg="$2" priority="${3:-3}" sound="${4:-dialog-information.oga}"
-    hostenv notify-send -a sysmon -i utilities-system-monitor "$title" "$msg" 2>/dev/null &
-    sf="$SOUND_DIR/$sound"
-    [ -f "$sf" ] && hostenv paplay "$sf" 2>/dev/null &
+    if ! desktop_muted "$title"; then
+        (   # desktop popup + sound: retry every DESKTOP_RETRY_SECS until the
+            # desktop session is up (notify at boot happens before it exists)
+            attempt=0
+            while [ "$attempt" -lt "$DESKTOP_RETRIES" ]; do
+                if gui "$HOME/.local/bin/hostenv" notify-send -a sysmon -i utilities-system-monitor "$title" "$msg" 2>/dev/null; then
+                    [ -n "$sound" ] && [ -f "$SOUND_DIR/$sound" ] && gui "$HOME/.local/bin/hostenv" paplay "$SOUND_DIR/$sound" 2>/dev/null
+                    break
+                fi
+                attempt=$((attempt + 1))
+                sleep "$DESKTOP_RETRY_SECS"
+            done
+        ) &
+    fi
     if [ -n "$NTFY_TOKEN" ]; then
         curl -sf -o /dev/null -H "Title: $title" -H "Priority: $priority" -H "Authorization: Bearer $NTFY_TOKEN" -d "$msg" "http://127.0.0.1:8989/$NTFY_TOPIC" >/dev/null 2>&1 &
     else

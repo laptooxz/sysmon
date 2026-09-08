@@ -24,3 +24,15 @@ NTFY_TOPIC="sysmon"
 # Optional: forward priority>=5 infra alerts (Service*/Tunnel*/Docker*) to a
 # public ntfy.sh topic so they reach you when the local tunnel is down.
 NTFY_CRITICAL_TOPIC=""
+
+# Desktop notifications (notify-send + paplay) run as this user when sysmon is
+# root (the session bus/pulse socket lives in that user's runtime dir, and the
+# session bus closes connections from uid 0).
+DESKTOP_USER=main
+# Retry desktop delivery until the desktop session exists (sysmon starts before
+# the display manager at boot): every DESKTOP_RETRY_SECS, up to DESKTOP_RETRIES.
+DESKTOP_RETRY_SECS=5
+DESKTOP_RETRIES=12
+# Space-separated title globs whose popup+sound are suppressed (ntfy + events
+# still fire). e.g. DESKTOP_MUTE_PATTERNS="Load:*" mutes load-spike pops.
+DESKTOP_MUTE_PATTERNS="Load:*"
