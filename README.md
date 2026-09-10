@@ -2,8 +2,6 @@
 
 A lightweight, dependency-light **system monitor daemon** in a single POSIX shell script. Polls SSH auth, OpenRC services, Docker containers, local HTTP endpoints, and resource usage, and fires notifications on state changes.
 
-Borrowed from the [LAPTOO homelab](https://laptoo.xyz) (Alpine Linux / OpenRC / Cloudflare Tunnel).
-
 > **yep this is vibecoded aswell**
 
 ## Requirements
