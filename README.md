@@ -85,7 +85,10 @@ notifications, put a `hostenv` shim on `PATH` that just `exec "$@"`, or point
 | `resources.sh` | disk, memory, load | warn / critical / recovery (hysteresis) |
 | `system.sh` | — | heartbeat to events log every 30 min |
 
-`commands.sh` (not enabled by default on this repo template) tails a command log — it's a homelab-specific extra; drop it from the plugin dir if you don't have that log.
+`commands.sh` tails a homelab-specific command log
+(`/var/log/sysmon_cmds.log`). It stays inert while that file doesn't exist, but
+the install step above copies every `plugins/*.sh`, so remove it from the
+plugin dir if you don't have that log.
 
 ## Layout
 
